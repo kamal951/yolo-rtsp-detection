@@ -3,7 +3,9 @@ import { toast } from "react-toastify";
 import { startDetection, stopDetection } from "../services/api";
 
 function StreamInput({ onSessionStart, activeSession }) {
-  const [rtspUrl, setRtspUrl] = useState("");
+  const [rtspUrl, setRtspUrl] = useState(
+    localStorage.getItem("rtsp_url") || ""
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Handle form submission to start detection
@@ -60,6 +62,15 @@ function StreamInput({ onSessionStart, activeSession }) {
     <div className="card">
       <h2 className="text-xl font-bold mb-4">RTSP Stream Input</h2>
 
+      <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-100 text-blue-700">
+        <p className="text-sm font-medium">Enhanced Detection</p>
+        <p className="text-xs mt-1">
+          The system now detects persons, cars, and animals in real-time. All
+          object types are displayed in the stream, but only person detections
+          are saved to the database.
+        </p>
+      </div>
+
       <form onSubmit={handleStartDetection}>
         <div className="form-group">
           <label htmlFor="rtspUrl">RTSP URL:</label>
@@ -68,8 +79,11 @@ function StreamInput({ onSessionStart, activeSession }) {
             id="rtspUrl"
             className="form-control"
             placeholder="rtsp://username:password@example.com:554/stream"
-            value={rtspUrl}
-            onChange={(e) => setRtspUrl(e.target.value)}
+            value={localStorage.getItem("rtsp_url") || rtspUrl}
+            onChange={(e) => {
+              setRtspUrl(e.target.value);
+              localStorage.setItem("rtsp_url", e.target.value);
+            }}
             required
           />
           <small className="text-gray-500">

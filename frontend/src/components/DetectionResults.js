@@ -55,6 +55,19 @@ function DetectionResults({
   // Get the latest detection result (if any)
   const latestResult = detectionResults.length > 0 ? detectionResults[0] : null;
 
+  // Function to get count details
+  const getCountDetails = (result) => {
+    if (result.detection_counts) {
+      return `${result.detection_counts.person || 0} persons, ${
+        result.detection_counts.car || 0
+      } cars, ${result.detection_counts.animal || 0} animals`;
+    } else if (result.total_persons !== undefined) {
+      return `${result.total_persons} persons`;
+    } else {
+      return `${result.detections?.length || 0} detections`;
+    }
+  };
+
   return (
     <div className="card">
       <div className="flex justify-between items-center mb-4">
@@ -77,11 +90,27 @@ function DetectionResults({
         <p>No detection results available for this session yet.</p>
       ) : (
         <div>
+          {/* Live Stream View */}
+          {activeSession.status === "running" && (
+            <div className="mb-6">
+              <h3 className="font-bold text-lg mb-2">Live Stream</h3>
+              <div className="text-sm text-gray-500 mb-2">
+                Showing live RTSP stream with real-time object detection
+              </div>
+              {latestResult && (
+                <StreamView
+                  result={latestResult}
+                  activeSession={activeSession}
+                />
+              )}
+            </div>
+          )}
+
           {/* Latest Detection Preview */}
-          {latestResult && (
+          {latestResult && activeSession.status !== "running" && (
             <div className="mb-4">
               <h3 className="font-bold text-lg mb-2">Latest Detection</h3>
-              <StreamView result={latestResult} />
+              <StreamView result={latestResult} activeSession={activeSession} />
 
               <div className="mt-2 bg-gray-50 p-3 rounded-md">
                 <p>
@@ -89,10 +118,15 @@ function DetectionResults({
                   {formatTimestamp(latestResult.timestamp)}
                 </p>
                 <p>
-                  <strong>Total Persons:</strong> {latestResult.total_persons}
+                  <strong>Detections:</strong> {getCountDetails(latestResult)}
                 </p>
                 <p>
                   <strong>Frame ID:</strong> {latestResult.frame_id}
+                </p>
+                <p className="text-sm text-gray-500 mt-2">
+                  <em>
+                    Note: Only person detections are saved to the database
+                  </em>
                 </p>
               </div>
             </div>
@@ -108,7 +142,7 @@ function DetectionResults({
                   <tr>
                     <th>Timestamp</th>
                     <th>Frame</th>
-                    <th>Persons</th>
+                    <th>Detections</th>
                     <th>Details</th>
                   </tr>
                 </thead>
@@ -117,14 +151,33 @@ function DetectionResults({
                     <tr key={`${result.timestamp}-${index}`}>
                       <td>{formatTimestamp(result.timestamp)}</td>
                       <td>{result.frame_id}</td>
-                      <td>{result.total_persons}</td>
+                      <td>
+                        <span className="inline-flex items-center">
+                          {getCountDetails(result)}
+                        </span>
+                      </td>
                       <td>
                         <button
                           className="text-blue-600 hover:underline text-sm"
                           onClick={() => {
-                            // This could open a modal with more details
-                            console.log("Detection details:", result);
-                            alert(`Detected ${result.total_persons} persons`);
+                            // Display detection details in a nicer way
+                            const counts = result.detection_counts || {
+                              person: result.total_persons || 0,
+                              car: 0,
+                              animal: 0,
+                            };
+
+                            const detailsMessage = `
+                              Frame: ${result.frame_id}
+                              Timestamp: ${formatTimestamp(result.timestamp)}
+                              
+                              Detected objects:
+                              - Persons: ${counts.person || 0}
+                              - Cars: ${counts.car || 0}
+                              - Animals: ${counts.animal || 0}
+                            `;
+
+                            alert(detailsMessage);
                           }}
                         >
                           View

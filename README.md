@@ -1,14 +1,15 @@
 # RTSP Person Detection System
 
-This project provides a full-stack solution for processing RTSP video streams to detect persons using Ultralytics YOLOv8. It consists of a Python Flask backend for video processing and a React frontend for user interaction.
+This project provides a full-stack solution for processing RTSP video streams to detect persons, cars, and animals using Ultralytics YOLOv8. It consists of a Python Flask backend for video processing and a React frontend for user interaction.
 
 ## Features
 
-- Process RTSP video streams and detect persons using YOLOv8
+- Process RTSP video streams and detect multiple object classes (persons, cars, and animals) using YOLOv8
+- Display all detections in real-time with color-coded bounding boxes
 - Start/stop detection sessions from the frontend
-- View real-time detection results with bounding boxes
+- Save person detections for later analysis (cars and animals are displayed but not saved)
 - Track multiple detection sessions
-- Save detection results for later analysis
+- View detection statistics and history
 
 ## System Architecture
 
@@ -16,14 +17,15 @@ The system is composed of two main containers:
 
 1. **Backend Container**:
    - Flask API server for handling client requests
-   - YOLOv8 person detection using Ultralytics
+   - YOLOv8 object detection using Ultralytics
    - OpenCV for video stream processing
-   - Detection results storage
+   - Detection results storage (person detections only)
 
 2. **Frontend Container**:
    - React-based user interface
    - Session management
-   - Detection results visualization
+   - Multi-class detection results visualization
+   - Color-coded display of different object classes
 
 ## Requirements
 
@@ -63,6 +65,14 @@ Open your browser and navigate to http://localhost:3000 to access the frontend i
 3. View real-time detection results in the dashboard
 4. Stop the detection when finished
 
+## Detection Details
+
+- **Persons**: Displayed with green bounding boxes and saved to the database
+- **Cars**: Displayed with red bounding boxes (not saved)
+- **Animals**: Displayed with blue bounding boxes (not saved)
+
+Only person detections are saved for historical analysis, but all object types are visible in the real-time stream display.
+
 ## API Endpoints
 
 ### Backend API
@@ -83,7 +93,7 @@ The backend container is configured to use NVIDIA GPUs if available. Make sure y
 rtsp-detection-system/
 ├── backend/              # Python Flask backend
 │   ├── app.py            # Main API server
-│   ├── detection_service.py  # YOLOv8 detection
+│   ├── detection_service.py  # YOLOv8 multi-class detection
 │   ├── utils.py          # Utility functions
 │   ├── requirements.txt  # Python dependencies
 │   └── Dockerfile        # Backend container
@@ -113,11 +123,11 @@ rtsp-detection-system/
 ## Extending the Project
 
 - Add authentication for secure access
-- Implement motion detection to trigger person detection
-- Support multiple object classes beyond just person detection
+- Implement motion detection to trigger object detection
+- Support additional object classes beyond persons, cars, and animals
 - Add recording capabilities for detected events
 - Integrate with notification systems
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the LICENSE file for details

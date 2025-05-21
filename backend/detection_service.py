@@ -14,7 +14,9 @@ class RTSPDetector:
                  model_name="yolov8n.pt", 
                  confidence=0.5,
                  save_interval=1.0,  # Save results every 1 second
-                 person_class_id=0):  # Person class ID in COCO dataset
+                 # COCO class IDs: 0-person, 2-car, 16-dog (representing animals)
+                 detect_classes=[0, 2, 16],
+                 save_classes=[0]):  # Only save person detections
         
         self.rtsp_url = rtsp_url
         self.session_id = session_id
@@ -22,13 +24,22 @@ class RTSPDetector:
         self.model_name = model_name
         self.confidence = confidence
         self.save_interval = save_interval
-        self.person_class_id = person_class_id
+        self.detect_classes = detect_classes
+        self.save_classes = save_classes
+        
+        # Class name mapping
+        self.class_names = {
+            0: "person",
+            2: "car",
+            16: "animal"  # Using dog as a representative for animals
+        }
         
         self.running = False
         self.last_save_time = 0
         self.frame_count = 0
         self.current_frame = None
         self.current_results = None
+        self.current_full_detections = None  # Store all detections (person, car, animal)
         
         # Initialize model
         try:
@@ -95,14 +106,18 @@ class RTSPDetector:
         # Get frame dimensions
         height, width = frame.shape[:2]
         
-        detections = []
+        saved_detections = []    # Detections to be saved (persons only)
+        all_detections = []      # All detections for display (persons, cars, animals)
+        
         if len(results) > 0:
             # Process first result (we're processing one frame at a time)
             result = results[0]
             
             for i, det in enumerate(result.boxes):
-                # Check if detection is a person
-                if int(det.cls) == self.person_class_id:
+                class_id = int(det.cls)
+                
+                # Check if this class should be detected (person, car, or animal)
+                if class_id in self.detect_classes:
                     # Get bounding box coordinates
                     box = det.xyxy[0].tolist()  # Convert tensor to list
                     
@@ -114,53 +129,86 @@ class RTSPDetector:
                         box[3] / height   # y2
                     ]
                     
-                    # Add detection
-                    detections.append({
+                    # Map class ID to name (use "animal" for class 16)
+                    class_name = self.class_names.get(class_id, "unknown")
+                    
+                    # Create detection object
+                    detection = {
                         "id": i,
-                        "class": "person",
+                        "class": class_name,
+                        "class_id": class_id,
                         "confidence": float(det.conf),
                         "bbox": [float(x) for x in box],  # Absolute coordinates
                         "rel_bbox": [float(x) for x in rel_box]  # Relative coordinates
-                    })
+                    }
+                    
+                    # Add to all detections list
+                    all_detections.append(detection)
+                    
+                    # Also add to saved detections if it's in save_classes
+                    if class_id in self.save_classes:
+                        saved_detections.append(detection)
         
-        # Store current results
+        # Store detections for saving (persons only)
         self.current_results = {
             "timestamp": datetime.now().isoformat(),
             "frame_id": self.frame_count,
-            "detections": detections,
-            "total_persons": len(detections)
+            "detections": saved_detections,
+            "total_persons": len(saved_detections)
+        }
+        
+        # Store all detections for display (persons, cars, animals)
+        self.current_full_detections = {
+            "timestamp": datetime.now().isoformat(),
+            "frame_id": self.frame_count,
+            "detections": all_detections,
+            "detection_counts": {
+                "person": sum(1 for d in all_detections if d["class"] == "person"),
+                "car": sum(1 for d in all_detections if d["class"] == "car"),
+                "animal": sum(1 for d in all_detections if d["class"] == "animal")
+            },
+            "total_detections": len(all_detections)
         }
     
     def _save_results(self):
-        """Save detection results to file"""
+        """Save detection results to file (persons only)"""
         if self.current_results is None:
             return
         
         # Create timestamp for filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         
-        # Save detection results as JSON
+        # Save detection results as JSON (persons only)
         results_file = os.path.join(self.output_dir, f"detection_{timestamp}.json")
         with open(results_file, 'w') as f:
             json.dump(self.current_results, f)
         
-        # Optionally save frame with detections
+        # Optionally save frame with all detections
         if self.current_frame is not None:
             # Draw bounding boxes on a copy of the frame
             annotated_frame = self.current_frame.copy()
             
-            for det in self.current_results["detections"]:
+            # Different colors for different classes
+            colors = {
+                "person": (0, 255, 0),  # Green for persons
+                "car": (0, 0, 255),     # Red for cars
+                "animal": (255, 0, 0)   # Blue for animals
+            }
+            
+            for det in self.current_full_detections["detections"]:
                 bbox = det["bbox"]
                 x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
                 conf = det["confidence"]
+                class_name = det["class"]
                 
-                # Draw bounding box
-                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                # Draw bounding box with class-specific color
+                color = colors.get(class_name, (255, 255, 255))
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
                 
                 # Add label
-                label = f"Person: {conf:.2f}"
+                label = f"{class_name}: {conf:.2f}"
                 cv2.putText(annotated_frame, label, (x1, y1 - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             
             # Save annotated frame
             frame_file = os.path.join(self.output_dir, f"frame_{timestamp}.jpg")
