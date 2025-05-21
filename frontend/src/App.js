@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Dashboard from "./components/Dashboard";
 import StreamInput from "./components/StreamInput";
 import DetectionResults from "./components/DetectionResults";
+import ImageGallery from "./components/ImageGallery";
 import "./App.css";
 
 function App() {
@@ -32,6 +33,11 @@ function App() {
               setDetectionResults={setDetectionResults}
             />
           </div>
+        </div>
+
+        {/* Image Gallery */}
+        <div className="mt-8">
+          <ImageGallery activeSession={activeSession} />
         </div>
 
         {/* Dashboard with All Sessions */}

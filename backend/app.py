@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 import os
 import uuid
@@ -9,6 +9,10 @@ from detection_service import RTSPDetector
 import utils
 import cv2
 import numpy as np
+import logging
+
+# Configure Flask logging to be less verbose
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 app = Flask(__name__)
 CORS(app)
@@ -16,6 +20,10 @@ CORS(app)
 # Directory to save detection results
 RESULTS_DIR = os.environ.get('RESULTS_DIR', '/app/detection_results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
+
+# Directory to save images
+IMAGES_DIR = os.environ.get('IMAGES_DIR', '/app/saved_images')
+os.makedirs(IMAGES_DIR, exist_ok=True)
 
 # Dictionary to store active detection sessions
 active_sessions = {}
@@ -38,11 +46,16 @@ def start_detection():
         session_dir = os.path.join(RESULTS_DIR, session_id)
         os.makedirs(session_dir, exist_ok=True)
         
+        # Create session-specific directory for images
+        session_images_dir = os.path.join(IMAGES_DIR, session_id)
+        os.makedirs(session_images_dir, exist_ok=True)
+        
         # Create detector for this session
         detector = RTSPDetector(
             rtsp_url=rtsp_url,
             session_id=session_id,
-            output_dir=session_dir
+            output_dir=session_dir,
+            images_dir=IMAGES_DIR
         )
         
         # Start detection in a separate thread
@@ -56,13 +69,18 @@ def start_detection():
             "start_time": time.time(),
             "detector": detector,
             "thread": detection_thread,
-            "status": "running"
+            "status": "running",
+            "images_dir": session_images_dir
         }
+        
+        print(f"[API] New detection session started: {session_id[:8]}... for {rtsp_url}")
+        print(f"[API] Images will be saved to: {session_images_dir}")
         
         return jsonify({
             "session_id": session_id,
             "status": "started",
-            "message": "Person detection started successfully"
+            "message": "Person detection started successfully",
+            "images_dir": session_images_dir
         }), 201
         
     except Exception as e:
@@ -77,6 +95,8 @@ def stop_detection(session_id):
         # Stop the detector
         active_sessions[session_id]["detector"].stop_detection()
         active_sessions[session_id]["status"] = "stopped"
+        
+        print(f"[API] Detection session stopped: {session_id[:8]}...")
         
         return jsonify({
             "session_id": session_id,
@@ -99,7 +119,8 @@ def session_status(session_id):
         "rtsp_url": session["rtsp_url"],
         "start_time": session["start_time"],
         "status": session["status"],
-        "runtime": time.time() - session["start_time"]
+        "runtime": time.time() - session["start_time"],
+        "images_dir": session.get("images_dir", "")
     }), 200
 
 @app.route('/api/detection_results/<session_id>', methods=['GET'])
@@ -135,13 +156,15 @@ def get_detection_results(session_id):
             return jsonify({
                 "session_id": session_id,
                 "results": full_results,
-                "include_all_classes": True
+                "include_all_classes": True,
+                "images_dir": active_sessions[session_id].get("images_dir", "")
             }), 200
         
         return jsonify({
             "session_id": session_id,
             "results": results,
-            "include_all_classes": False
+            "include_all_classes": False,
+            "images_dir": active_sessions[session_id].get("images_dir", "")
         }), 200
         
     except Exception as e:
@@ -157,10 +180,57 @@ def list_sessions():
             "rtsp_url": session["rtsp_url"],
             "start_time": session["start_time"],
             "status": session["status"],
-            "runtime": time.time() - session["start_time"]
+            "runtime": time.time() - session["start_time"],
+            "images_dir": session.get("images_dir", "")
         })
     
     return jsonify({"sessions": sessions_data}), 200
+
+@app.route('/api/images/<session_id>/<image_name>', methods=['GET'])
+def get_image(session_id, image_name):
+    """
+    Serve image files from the saved_images directory
+    """
+    session_images_dir = os.path.join(IMAGES_DIR, session_id)
+    return send_from_directory(session_images_dir, image_name)
+
+@app.route('/api/images/<session_id>', methods=['GET'])
+def list_session_images(session_id):
+    """
+    List all images for a specific session
+    """
+    session_images_dir = os.path.join(IMAGES_DIR, session_id)
+    
+    if not os.path.exists(session_images_dir):
+        return jsonify({"error": "Session images directory not found"}), 404
+    
+    try:
+        image_files = [f for f in os.listdir(session_images_dir) if f.endswith('.jpg')]
+        image_files.sort(key=lambda x: os.path.getmtime(os.path.join(session_images_dir, x)), reverse=True)
+        
+        # Create full URLs for each image
+        base_url = request.host_url.rstrip('/')
+        images = []
+        
+        for image_file in image_files:
+            image_type = "original" if image_file.startswith("original_") else "annotated"
+            timestamp = image_file.split('_', 1)[1].rsplit('.', 1)[0]
+            
+            images.append({
+                "filename": image_file,
+                "type": image_type,
+                "timestamp": timestamp,
+                "url": f"{base_url}/api/images/{session_id}/{image_file}"
+            })
+        
+        return jsonify({
+            "session_id": session_id,
+            "image_count": len(images),
+            "images": images
+        }), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 def generate_frames(session_id):
     """
@@ -251,4 +321,7 @@ def video_feed(session_id):
     )
 
 if __name__ == '__main__':
+    print("[API] RTSP Detection System starting...")
+    print(f"[API] Detection results will be saved to: {RESULTS_DIR}")
+    print(f"[API] Images will be saved to: {IMAGES_DIR}")
     app.run(host='0.0.0.0', port=5000)

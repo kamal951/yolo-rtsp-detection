@@ -68,6 +68,24 @@ function DetectionResults({
     }
   };
 
+  // Function to check if a result has any detections
+  const hasDetections = (result) => {
+    if (result.detection_counts) {
+      return (
+        result.detection_counts.person > 0 ||
+        result.detection_counts.car > 0 ||
+        result.detection_counts.animal > 0
+      );
+    } else if (result.total_persons !== undefined) {
+      return result.total_persons > 0;
+    } else {
+      return result.detections && result.detections.length > 0;
+    }
+  };
+
+  // Filter results to only include those with detections
+  const resultsWithDetections = detectionResults.filter(hasDetections);
+
   return (
     <div className="card">
       <div className="flex justify-between items-center mb-4">
@@ -136,58 +154,62 @@ function DetectionResults({
           <div className="mt-6">
             <h3 className="font-bold text-lg mb-2">Detection History</h3>
 
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th>Timestamp</th>
-                    <th>Frame</th>
-                    <th>Detections</th>
-                    <th>Details</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detectionResults.map((result, index) => (
-                    <tr key={`${result.timestamp}-${index}`}>
-                      <td>{formatTimestamp(result.timestamp)}</td>
-                      <td>{result.frame_id}</td>
-                      <td>
-                        <span className="inline-flex items-center">
-                          {getCountDetails(result)}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          className="text-blue-600 hover:underline text-sm"
-                          onClick={() => {
-                            // Display detection details in a nicer way
-                            const counts = result.detection_counts || {
-                              person: result.total_persons || 0,
-                              car: 0,
-                              animal: 0,
-                            };
-
-                            const detailsMessage = `
-                              Frame: ${result.frame_id}
-                              Timestamp: ${formatTimestamp(result.timestamp)}
-                              
-                              Detected objects:
-                              - Persons: ${counts.person || 0}
-                              - Cars: ${counts.car || 0}
-                              - Animals: ${counts.animal || 0}
-                            `;
-
-                            alert(detailsMessage);
-                          }}
-                        >
-                          View
-                        </button>
-                      </td>
+            {resultsWithDetections.length === 0 ? (
+              <p>No detections found in this session yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr>
+                      <th>Timestamp</th>
+                      <th>Frame</th>
+                      <th>Detections</th>
+                      <th>Details</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {resultsWithDetections.map((result, index) => (
+                      <tr key={`${result.timestamp}-${index}`}>
+                        <td>{formatTimestamp(result.timestamp)}</td>
+                        <td>{result.frame_id}</td>
+                        <td>
+                          <span className="inline-flex items-center">
+                            {getCountDetails(result)}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            className="text-blue-600 hover:underline text-sm"
+                            onClick={() => {
+                              // Display detection details in a nicer way
+                              const counts = result.detection_counts || {
+                                person: result.total_persons || 0,
+                                car: 0,
+                                animal: 0,
+                              };
+
+                              const detailsMessage = `
+                                Frame: ${result.frame_id}
+                                Timestamp: ${formatTimestamp(result.timestamp)}
+                                
+                                Detected objects:
+                                - Persons: ${counts.person || 0}
+                                - Cars: ${counts.car || 0}
+                                - Animals: ${counts.animal || 0}
+                              `;
+
+                              alert(detailsMessage);
+                            }}
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

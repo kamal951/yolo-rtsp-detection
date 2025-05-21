@@ -16,11 +16,13 @@ class RTSPDetector:
                  save_interval=1.0,  # Save results every 1 second
                  # COCO class IDs: 0-person, 2-car, 16-dog (representing animals)
                  detect_classes=[0, 2, 16],
-                 save_classes=[0]):  # Only save person detections
+                 save_classes=[0],   # Only save person detections
+                 images_dir=None):   # Directory for saved images
         
         self.rtsp_url = rtsp_url
         self.session_id = session_id
         self.output_dir = output_dir
+        self.images_dir = images_dir or os.environ.get('IMAGES_DIR', '/app/saved_images')
         self.model_name = model_name
         self.confidence = confidence
         self.save_interval = save_interval
@@ -41,8 +43,19 @@ class RTSPDetector:
         self.current_results = None
         self.current_full_detections = None  # Store all detections (person, car, animal)
         
+        # Ensure images directory exists
+        os.makedirs(self.images_dir, exist_ok=True)
+        
+        # Create session-specific directory for images
+        self.session_images_dir = os.path.join(self.images_dir, session_id)
+        os.makedirs(self.session_images_dir, exist_ok=True)
+        
         # Initialize model
         try:
+            # Disable verbose output from YOLO model
+            import logging
+            logging.getLogger("ultralytics").setLevel(logging.WARNING)
+            
             self.model = YOLO(model_name)
             print(f"Model {model_name} loaded successfully")
         except Exception as e:
@@ -60,7 +73,8 @@ class RTSPDetector:
             if not cap.isOpened():
                 raise Exception(f"Could not open RTSP stream: {self.rtsp_url}")
             
-            print(f"Successfully opened RTSP stream: {self.rtsp_url}")
+            print(f"[Session {self.session_id[:8]}] Detection started on stream: {self.rtsp_url}")
+            print(f"[Session {self.session_id[:8]}] Saving images to: {self.session_images_dir}")
             
             # Main detection loop
             while self.running:
@@ -78,7 +92,7 @@ class RTSPDetector:
                 self.current_frame = frame
                 
                 # Run detection
-                results = self.model(frame, conf=self.confidence)
+                results = self.model(frame, conf=self.confidence, verbose=False)
                 
                 # Process results
                 self._process_results(results, frame)
@@ -91,7 +105,7 @@ class RTSPDetector:
             
             # Clean up
             cap.release()
-            print(f"Detection stopped for session {self.session_id}")
+            print(f"[Session {self.session_id[:8]}] Detection stopped")
             
         except Exception as e:
             print(f"Error in detection process: {e}")
@@ -169,6 +183,11 @@ class RTSPDetector:
             },
             "total_detections": len(all_detections)
         }
+        
+        # Log only when we find objects (to reduce verbose output)
+        if all_detections:
+            counts = self.current_full_detections["detection_counts"]
+            print(f"[Session {self.session_id[:8]}] Detected: {counts['person']} persons, {counts['car']} cars, {counts['animal']} animals")
     
     def _save_results(self):
         """Save detection results to file (persons only)"""
@@ -183,8 +202,12 @@ class RTSPDetector:
         with open(results_file, 'w') as f:
             json.dump(self.current_results, f)
         
-        # Optionally save frame with all detections
-        if self.current_frame is not None:
+        # Save both the original frame and the annotated frame if we have detections
+        if self.current_frame is not None and self.current_full_detections["total_detections"] > 0:
+            # Save original frame to the images directory
+            original_frame_file = os.path.join(self.session_images_dir, f"original_{timestamp}.jpg")
+            cv2.imwrite(original_frame_file, self.current_frame)
+            
             # Draw bounding boxes on a copy of the frame
             annotated_frame = self.current_frame.copy()
             
@@ -210,8 +233,29 @@ class RTSPDetector:
                 cv2.putText(annotated_frame, label, (x1, y1 - 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             
-            # Save annotated frame
-            frame_file = os.path.join(self.output_dir, f"frame_{timestamp}.jpg")
-            cv2.imwrite(frame_file, annotated_frame)
+            # Add a timestamp and session info
+            cv2.putText(
+                annotated_frame,
+                f"Session: {self.session_id[:8]}... | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2
+            )
+            
+            # Save annotated frame to both directories
+            annotated_frame_file = os.path.join(self.output_dir, f"frame_{timestamp}.jpg")
+            cv2.imwrite(annotated_frame_file, annotated_frame)
+            
+            # Also save to the images directory
+            annotated_image_file = os.path.join(self.session_images_dir, f"annotated_{timestamp}.jpg")
+            cv2.imwrite(annotated_image_file, annotated_frame)
+            
+            # Update the current_results to include the image paths
+            self.current_results["original_image_path"] = original_frame_file
+            self.current_results["annotated_image_path"] = annotated_image_file
         
-        print(f"Saved detection results for session {self.session_id}, frame {self.frame_count}")
+        # Only log when we're actually saving results with detections
+        if self.current_results and self.current_results["detections"]:
+            print(f"[Session {self.session_id[:8]}] Saved frame {self.frame_count} with {self.current_results['total_persons']} persons")

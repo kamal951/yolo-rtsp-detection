@@ -20,8 +20,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create directory for detection results
+# Create directories for detection results and saved images
 RUN mkdir -p /app/detection_results
+RUN mkdir -p /app/saved_images
 
 # Expose API port
 EXPOSE 5000

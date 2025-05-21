@@ -8,8 +8,10 @@ services:
     container_name: rtsp-detection-backend
     volumes:
       - detection_results:/app/detection_results
+      - ./saved_images:/app/saved_images
     environment:
       - RESULTS_DIR=/app/detection_results
+      - IMAGES_DIR=/app/saved_images
     ports:
       - "5000:5000"
     restart: unless-stopped
