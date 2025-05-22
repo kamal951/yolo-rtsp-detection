@@ -3,6 +3,8 @@ import React, { useEffect, useState } from "react";
 function StreamView({ result, activeSession }) {
   const [streamUrl, setStreamUrl] = useState("");
   const [showSimulation, setShowSimulation] = useState(false);
+  const [streamError, setStreamError] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     // If we have an active session, create the stream URL
@@ -11,16 +13,59 @@ function StreamView({ result, activeSession }) {
       activeSession.session_id &&
       activeSession.status === "running"
     ) {
-      const apiUrl =
-        process.env.REACT_APP_API_URL || "http://localhost:5000/api";
-      const baseUrl = apiUrl.replace("/api", ""); // Remove '/api' if present
-      setStreamUrl(`${baseUrl}/api/stream/${activeSession.session_id}`);
+      // Get the current page's protocol and hostname
+      const protocol = window.location.protocol;
+      const hostname = window.location.hostname;
+
+      // Determine the correct API URL
+      let apiBaseUrl;
+      if (process.env.REACT_APP_API_URL) {
+        // Use environment variable if set
+        apiBaseUrl = process.env.REACT_APP_API_URL.replace("/api", "");
+      } else {
+        // Fallback to current hostname with port 5000
+        apiBaseUrl = `${protocol}//${hostname}:5000`;
+      }
+
+      const streamEndpoint = `${apiBaseUrl}/api/stream/${activeSession.session_id}`;
+      setStreamUrl(streamEndpoint);
       setShowSimulation(false);
+      setStreamError(false);
+      setRetryCount(0);
+
+      console.log("Stream URL:", streamEndpoint);
     } else {
       setStreamUrl("");
       setShowSimulation(true);
     }
   }, [activeSession]);
+
+  // Handle image load error
+  const handleImageError = (e) => {
+    console.error("Stream image error:", e);
+    setStreamError(true);
+
+    // Try to retry a few times
+    if (retryCount < 3) {
+      setTimeout(() => {
+        setRetryCount((prev) => prev + 1);
+        setStreamError(false);
+        // Force reload by adding timestamp
+        const newUrl = streamUrl.includes("?")
+          ? `${streamUrl}&retry=${Date.now()}`
+          : `${streamUrl}?retry=${Date.now()}`;
+        setStreamUrl(newUrl);
+      }, 2000);
+    } else {
+      setShowSimulation(true);
+    }
+  };
+
+  // Handle image load success
+  const handleImageLoad = () => {
+    setStreamError(false);
+    setRetryCount(0);
+  };
 
   // Container style for both real stream and simulation
   const containerStyle = {
@@ -42,13 +87,20 @@ function StreamView({ result, activeSession }) {
   if (!result || !result.detections) {
     return (
       <div className="bg-gray-200 h-48 flex items-center justify-center">
-        No detection data available
+        <div className="text-center">
+          <p>No detection data available</p>
+          {streamUrl && (
+            <p className="text-xs text-gray-500 mt-2">
+              Stream URL: {streamUrl}
+            </p>
+          )}
+        </div>
       </div>
     );
   }
 
-  // Show actual video stream if available
-  if (streamUrl && !showSimulation) {
+  // Show actual video stream if available and no errors
+  if (streamUrl && !showSimulation && !streamError) {
     return (
       <div className="border rounded-md overflow-hidden">
         <div
@@ -58,9 +110,15 @@ function StreamView({ result, activeSession }) {
           <img
             src={streamUrl}
             alt="RTSP Stream"
-            className="object-contain"
-            style={{ width: "550px", height: "309px" }}
-            onError={() => setShowSimulation(true)} // Fall back to simulation on error
+            className="object-contain max-w-full max-h-full"
+            onError={handleImageError}
+            onLoad={handleImageLoad}
+            style={{
+              width: "auto",
+              height: "auto",
+              maxWidth: "550px",
+              maxHeight: "309px",
+            }}
           />
         </div>
 
@@ -91,22 +149,55 @@ function StreamView({ result, activeSession }) {
             </span>
           )}
 
-          {/* Note about saving */}
+          {/* Stream status */}
           <span className="italic opacity-75 text-xs">
-            Only person detections are saved
+            Live Stream {retryCount > 0 ? `(Retry ${retryCount})` : ""}
           </span>
         </div>
       </div>
     );
   }
 
-  // Show simulation if no stream is available or on error
+  // Show error state
+  if (streamError && retryCount >= 3) {
+    return (
+      <div className="border rounded-md overflow-hidden">
+        <div
+          style={containerStyle}
+          className="flex items-center justify-center bg-red-900"
+        >
+          <div className="text-white text-center">
+            <p>Stream Error</p>
+            <p className="text-xs mt-2">Could not load live stream</p>
+            <p className="text-xs mt-1">URL: {streamUrl}</p>
+            <button
+              className="mt-2 px-3 py-1 bg-red-600 text-white text-xs rounded"
+              onClick={() => {
+                setStreamError(false);
+                setRetryCount(0);
+                setShowSimulation(false);
+              }}
+            >
+              Retry Stream
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show simulation if no stream is available or on persistent error
   return (
     <div className="border rounded-md overflow-hidden">
       <div style={containerStyle}>
         {/* This simulates a frame from the video stream */}
         <div className="text-white text-center pt-2 opacity-50">
           Stream visualization (Frame {result.frame_id})
+          {streamError && (
+            <div className="text-red-400 text-xs">
+              Stream offline - showing simulation
+            </div>
+          )}
         </div>
 
         {/* Draw detected objects */}
@@ -184,9 +275,9 @@ function StreamView({ result, activeSession }) {
           </span>
         )}
 
-        {/* Note about saving */}
+        {/* Note about simulation */}
         <span className="italic opacity-75 text-xs">
-          Only person detections are saved
+          {streamError ? "Simulation Mode" : "Only person detections are saved"}
         </span>
       </div>
     </div>

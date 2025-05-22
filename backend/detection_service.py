@@ -69,39 +69,50 @@ class RTSPDetector:
             print(f"Error loading model: {e}")
             raise
     
-    def start_detection(self):
-        """Start the detection process on the RTSP stream"""
-        self.running = True
+    # In the start_detection method, add better frame management:
+
+def start_detection(self):
+    """Start the detection process on the RTSP stream"""
+    self.running = True
+    
+    try:
+        # Open RTSP stream with optimized settings
+        cap = cv2.VideoCapture(self.rtsp_url)
         
-        try:
-            # Open RTSP stream with optimized settings for CPU
-            cap = cv2.VideoCapture(self.rtsp_url)
+        # Set buffer size to reduce latency
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Set frame rate
+        cap.set(cv2.CAP_PROP_FPS, 10)
+        
+        if not cap.isOpened():
+            raise Exception(f"Could not open RTSP stream: {self.rtsp_url}")
+        
+        print(f"[Session {self.session_id[:8]}] Detection started on stream: {self.rtsp_url}")
+        print(f"[Session {self.session_id[:8]}] Using device: {self.device}")
+        print(f"[Session {self.session_id[:8]}] Saving images to: {self.session_images_dir}")
+        
+        frame_skip = 0  # Process every frame initially
+        
+        # Main detection loop
+        while self.running:
+            ret, frame = cap.read()
             
-            # Set buffer size to reduce latency
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if not ret:
+                print("Failed to read frame, retrying...")
+                time.sleep(1)
+                cap.release()
+                cap = cv2.VideoCapture(self.rtsp_url)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                cap.set(cv2.CAP_PROP_FPS, 10)
+                continue
             
-            if not cap.isOpened():
-                raise Exception(f"Could not open RTSP stream: {self.rtsp_url}")
+            self.frame_count += 1
             
-            print(f"[Session {self.session_id[:8]}] Detection started on stream: {self.rtsp_url}")
-            print(f"[Session {self.session_id[:8]}] Using device: {self.device}")
-            print(f"[Session {self.session_id[:8]}] Saving images to: {self.session_images_dir}")
+            # Always update current frame for streaming
+            self.current_frame = frame.copy()
             
-            # Main detection loop
-            while self.running:
-                ret, frame = cap.read()
-                
-                if not ret:
-                    print("Failed to read frame, retrying...")
-                    time.sleep(1)
-                    cap.release()
-                    cap = cv2.VideoCapture(self.rtsp_url)
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    continue
-                
-                self.frame_count += 1
-                self.current_frame = frame
-                
+            # Process detection every few frames to reduce CPU load
+            if frame_skip == 0:
                 # Run detection on CPU with optimized settings
                 results = self.model(
                     frame, 
@@ -120,16 +131,20 @@ class RTSPDetector:
                     self._save_results()
                     self.last_save_time = current_time
                 
-                # Add small delay to prevent CPU overload
-                time.sleep(0.01)
+                frame_skip = 2  # Skip next 2 frames
+            else:
+                frame_skip -= 1
             
-            # Clean up
-            cap.release()
-            print(f"[Session {self.session_id[:8]}] Detection stopped")
-            
-        except Exception as e:
-            print(f"Error in detection process: {e}")
-            self.running = False
+            # Small delay to prevent CPU overload
+            time.sleep(0.05)  # 20 FPS max
+        
+        # Clean up
+        cap.release()
+        print(f"[Session {self.session_id[:8]}] Detection stopped")
+        
+    except Exception as e:
+        print(f"Error in detection process: {e}")
+        self.running = False
     
     # Rest of the methods remain the same...
     def stop_detection(self):

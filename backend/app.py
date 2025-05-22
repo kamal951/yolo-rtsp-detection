@@ -1,6 +1,5 @@
-# app.py
 from flask import Flask, request, jsonify, Response, send_from_directory
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 import os
 import uuid
 import time
@@ -15,7 +14,13 @@ import logging
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 # Directory to save detection results
 RESULTS_DIR = os.environ.get('RESULTS_DIR', '/app/detection_results')
@@ -314,13 +319,97 @@ def generate_frames(session_id):
             time.sleep(1)  # Longer delay on error
 
 @app.route('/api/stream/<session_id>')
+@cross_origin()
 def video_feed(session_id):
     """
     Video streaming route. Put this in the src attribute of an img tag.
     """
+    def generate():
+        if session_id not in active_sessions:
+            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Session not found") + b'\r\n'
+            return
+        
+        detector = active_sessions[session_id].get("detector")
+        if not detector:
+            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Detector not found") + b'\r\n'
+            return
+        
+        # Check if session is running
+        if active_sessions[session_id]["status"] != "running":
+            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Session not running") + b'\r\n'
+            return
+        
+        while active_sessions[session_id]["status"] == "running":
+            try:
+                # Get the current processed frame from detector
+                if detector.current_frame is not None:
+                    # Create a copy of the frame with bounding boxes
+                    annotated_frame = detector.current_frame.copy()
+                    
+                    # Draw bounding boxes for all detected objects
+                    if hasattr(detector, 'current_full_detections') and detector.current_full_detections:
+                        # Different colors for different classes
+                        colors = {
+                            "person": (0, 255, 0),  # Green for persons
+                            "car": (0, 0, 255),     # Red for cars
+                            "animal": (255, 0, 0)   # Blue for animals
+                        }
+                        
+                        for det in detector.current_full_detections["detections"]:
+                            bbox = det["bbox"]
+                            x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+                            conf = det["confidence"]
+                            class_name = det["class"]
+                            
+                            # Draw bounding box with class-specific color
+                            color = colors.get(class_name, (255, 255, 255))
+                            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+                            
+                            # Add label
+                            label = f"{class_name}: {conf:.2f}"
+                            cv2.putText(annotated_frame, label, (x1, y1 - 10),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                    
+                    # Add a timestamp
+                    cv2.putText(
+                        annotated_frame,
+                        f"Session: {session_id[:8]}... | Frame: {detector.frame_count}",
+                        (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2
+                    )
+                    
+                    # Encode to JPEG format with better quality
+                    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                    ret, buffer = cv2.imencode('.jpg', annotated_frame, encode_param)
+                    
+                    if ret:
+                        frame = buffer.tobytes()
+                        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
+                    else:
+                        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Encoding error") + b'\r\n'
+                else:
+                    # If no frame is available, yield a placeholder
+                    yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("No frame available") + b'\r\n'
+                
+                # Sleep briefly to control frame rate
+                time.sleep(0.1)  # 10 FPS for better performance on CPU
+                
+            except Exception as e:
+                print(f"Error generating frame: {e}")
+                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame(f"Error: {str(e)}") + b'\r\n'
+                time.sleep(1)  # Longer delay on error
+    
     return Response(
-        generate_frames(session_id),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
+        generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame',
+        headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        }
     )
 
 if __name__ == '__main__':
