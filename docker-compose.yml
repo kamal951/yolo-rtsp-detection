@@ -1,19 +1,6 @@
 version: "3"
 
 services:
-  nginx:
-    image: nginx:alpine
-    container_name: rtsp-detection-proxy
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - rtsp-network
-
   backend:
     build:
       context: ./backend
@@ -26,8 +13,8 @@ services:
       - RESULTS_DIR=/app/detection_results
       - IMAGES_DIR=/app/saved_images
       - DEVICE=cpu
-    expose:
-      - "5000"
+    ports:
+      - "5000:5000"
     restart: unless-stopped
     networks:
       - rtsp-network
@@ -38,9 +25,10 @@ services:
       dockerfile: Dockerfile
     container_name: rtsp-detection-frontend
     environment:
-      - REACT_APP_API_URL=/api
-    expose:
-      - "3000"
+      # Utiliser le nom du service backend au lieu de localhost
+      - REACT_APP_API_URL=http://backend:5000/api
+    ports:
+      - "3000:3000"
     depends_on:
       - backend
     restart: unless-stopped
@@ -50,6 +38,7 @@ services:
 volumes:
   detection_results:
 
+# Ajouter un réseau dédié
 networks:
   rtsp-network:
     driver: bridge
