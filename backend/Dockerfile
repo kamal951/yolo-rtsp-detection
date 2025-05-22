@@ -16,6 +16,11 @@ WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
+
+# Install PyTorch CPU version explicitly first
+RUN pip install --no-cache-dir torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cpu
+
+# Install other requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
@@ -29,6 +34,7 @@ RUN mkdir -p /app/saved_images
 ENV OMP_NUM_THREADS=4
 ENV MKL_NUM_THREADS=4
 ENV NUMBA_NUM_THREADS=4
+ENV TORCH_NUM_THREADS=4
 
 # Expose API port
 EXPOSE 5000
