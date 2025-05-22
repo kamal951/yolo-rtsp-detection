@@ -13,11 +13,11 @@ class RTSPDetector:
     def __init__(self, rtsp_url, session_id, output_dir, 
                  model_name="yolov8n.pt", 
                  confidence=0.5,
-                 save_interval=1.0,  # Save results every 1 second
-                 # COCO class IDs: 0-person, 2-car, 16-dog (representing animals)
+                 save_interval=1.0,
                  detect_classes=[0, 2, 16],
-                 save_classes=[0],   # Only save person detections
-                 images_dir=None):   # Directory for saved images
+                 save_classes=[0],
+                 images_dir=None,
+                 device='cpu'):  # New parameter for device
         
         self.rtsp_url = rtsp_url
         self.session_id = session_id
@@ -29,11 +29,17 @@ class RTSPDetector:
         self.detect_classes = detect_classes
         self.save_classes = save_classes
         
+        # Force CPU usage
+        self.device = 'cpu'
+        
+        # Set PyTorch to use CPU
+        torch.set_num_threads(4)  # Optimize for CPU
+        
         # Class name mapping
         self.class_names = {
             0: "person",
             2: "car",
-            16: "animal"  # Using dog as a representative for animals
+            16: "animal"
         }
         
         self.running = False
@@ -41,7 +47,7 @@ class RTSPDetector:
         self.frame_count = 0
         self.current_frame = None
         self.current_results = None
-        self.current_full_detections = None  # Store all detections (person, car, animal)
+        self.current_full_detections = None
         
         # Ensure images directory exists
         os.makedirs(self.images_dir, exist_ok=True)
@@ -50,14 +56,15 @@ class RTSPDetector:
         self.session_images_dir = os.path.join(self.images_dir, session_id)
         os.makedirs(self.session_images_dir, exist_ok=True)
         
-        # Initialize model
+        # Initialize model with CPU
         try:
-            # Disable verbose output from YOLO model
             import logging
             logging.getLogger("ultralytics").setLevel(logging.WARNING)
             
             self.model = YOLO(model_name)
-            print(f"Model {model_name} loaded successfully")
+            # Explicitly move model to CPU
+            self.model.to(self.device)
+            print(f"Model {model_name} loaded successfully on {self.device}")
         except Exception as e:
             print(f"Error loading model: {e}")
             raise
@@ -67,13 +74,17 @@ class RTSPDetector:
         self.running = True
         
         try:
-            # Open RTSP stream
+            # Open RTSP stream with optimized settings for CPU
             cap = cv2.VideoCapture(self.rtsp_url)
+            
+            # Set buffer size to reduce latency
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
             if not cap.isOpened():
                 raise Exception(f"Could not open RTSP stream: {self.rtsp_url}")
             
             print(f"[Session {self.session_id[:8]}] Detection started on stream: {self.rtsp_url}")
+            print(f"[Session {self.session_id[:8]}] Using device: {self.device}")
             print(f"[Session {self.session_id[:8]}] Saving images to: {self.session_images_dir}")
             
             # Main detection loop
@@ -83,16 +94,22 @@ class RTSPDetector:
                 if not ret:
                     print("Failed to read frame, retrying...")
                     time.sleep(1)
-                    # Reopen the stream if reading fails
                     cap.release()
                     cap = cv2.VideoCapture(self.rtsp_url)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                     continue
                 
                 self.frame_count += 1
                 self.current_frame = frame
                 
-                # Run detection
-                results = self.model(frame, conf=self.confidence, verbose=False)
+                # Run detection on CPU with optimized settings
+                results = self.model(
+                    frame, 
+                    conf=self.confidence, 
+                    verbose=False,
+                    device=self.device,
+                    half=False  # Disable half precision for CPU
+                )
                 
                 # Process results
                 self._process_results(results, frame)
@@ -102,6 +119,9 @@ class RTSPDetector:
                 if current_time - self.last_save_time >= self.save_interval:
                     self._save_results()
                     self.last_save_time = current_time
+                
+                # Add small delay to prevent CPU overload
+                time.sleep(0.01)
             
             # Clean up
             cap.release()
@@ -111,59 +131,51 @@ class RTSPDetector:
             print(f"Error in detection process: {e}")
             self.running = False
     
+    # Rest of the methods remain the same...
     def stop_detection(self):
         """Stop the detection process"""
         self.running = False
     
     def _process_results(self, results, frame):
-        """Process detection results"""
-        # Get frame dimensions
+        """Process detection results - same as original"""
+        # [Previous implementation remains unchanged]
         height, width = frame.shape[:2]
         
-        saved_detections = []    # Detections to be saved (persons only)
-        all_detections = []      # All detections for display (persons, cars, animals)
+        saved_detections = []
+        all_detections = []
         
         if len(results) > 0:
-            # Process first result (we're processing one frame at a time)
             result = results[0]
             
             for i, det in enumerate(result.boxes):
                 class_id = int(det.cls)
                 
-                # Check if this class should be detected (person, car, or animal)
                 if class_id in self.detect_classes:
-                    # Get bounding box coordinates
-                    box = det.xyxy[0].tolist()  # Convert tensor to list
+                    box = det.xyxy[0].tolist()
                     
-                    # Calculate relative coordinates (normalized)
                     rel_box = [
-                        box[0] / width,   # x1
-                        box[1] / height,  # y1
-                        box[2] / width,   # x2
-                        box[3] / height   # y2
+                        box[0] / width,
+                        box[1] / height,
+                        box[2] / width,
+                        box[3] / height
                     ]
                     
-                    # Map class ID to name (use "animal" for class 16)
                     class_name = self.class_names.get(class_id, "unknown")
                     
-                    # Create detection object
                     detection = {
                         "id": i,
                         "class": class_name,
                         "class_id": class_id,
                         "confidence": float(det.conf),
-                        "bbox": [float(x) for x in box],  # Absolute coordinates
-                        "rel_bbox": [float(x) for x in rel_box]  # Relative coordinates
+                        "bbox": [float(x) for x in box],
+                        "rel_bbox": [float(x) for x in rel_box]
                     }
                     
-                    # Add to all detections list
                     all_detections.append(detection)
                     
-                    # Also add to saved detections if it's in save_classes
                     if class_id in self.save_classes:
                         saved_detections.append(detection)
         
-        # Store detections for saving (persons only)
         self.current_results = {
             "timestamp": datetime.now().isoformat(),
             "frame_id": self.frame_count,
@@ -171,7 +183,6 @@ class RTSPDetector:
             "total_persons": len(saved_detections)
         }
         
-        # Store all detections for display (persons, cars, animals)
         self.current_full_detections = {
             "timestamp": datetime.now().isoformat(),
             "frame_id": self.frame_count,
@@ -184,38 +195,32 @@ class RTSPDetector:
             "total_detections": len(all_detections)
         }
         
-        # Log only when we find objects (to reduce verbose output)
         if all_detections:
             counts = self.current_full_detections["detection_counts"]
             print(f"[Session {self.session_id[:8]}] Detected: {counts['person']} persons, {counts['car']} cars, {counts['animal']} animals")
     
     def _save_results(self):
-        """Save detection results to file (persons only)"""
+        """Save detection results to file - same as original"""
+        # [Previous implementation remains unchanged]
         if self.current_results is None:
             return
         
-        # Create timestamp for filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         
-        # Save detection results as JSON (persons only)
         results_file = os.path.join(self.output_dir, f"detection_{timestamp}.json")
         with open(results_file, 'w') as f:
             json.dump(self.current_results, f)
         
-        # Save both the original frame and the annotated frame if we have detections
         if self.current_frame is not None and self.current_full_detections["total_detections"] > 0:
-            # Save original frame to the images directory
             original_frame_file = os.path.join(self.session_images_dir, f"original_{timestamp}.jpg")
             cv2.imwrite(original_frame_file, self.current_frame)
             
-            # Draw bounding boxes on a copy of the frame
             annotated_frame = self.current_frame.copy()
             
-            # Different colors for different classes
             colors = {
-                "person": (0, 255, 0),  # Green for persons
-                "car": (0, 0, 255),     # Red for cars
-                "animal": (255, 0, 0)   # Blue for animals
+                "person": (0, 255, 0),
+                "car": (0, 0, 255),
+                "animal": (255, 0, 0)
             }
             
             for det in self.current_full_detections["detections"]:
@@ -224,16 +229,13 @@ class RTSPDetector:
                 conf = det["confidence"]
                 class_name = det["class"]
                 
-                # Draw bounding box with class-specific color
                 color = colors.get(class_name, (255, 255, 255))
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
                 
-                # Add label
                 label = f"{class_name}: {conf:.2f}"
                 cv2.putText(annotated_frame, label, (x1, y1 - 10),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
             
-            # Add a timestamp and session info
             cv2.putText(
                 annotated_frame,
                 f"Session: {self.session_id[:8]}... | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -244,18 +246,14 @@ class RTSPDetector:
                 2
             )
             
-            # Save annotated frame to both directories
             annotated_frame_file = os.path.join(self.output_dir, f"frame_{timestamp}.jpg")
             cv2.imwrite(annotated_frame_file, annotated_frame)
             
-            # Also save to the images directory
             annotated_image_file = os.path.join(self.session_images_dir, f"annotated_{timestamp}.jpg")
             cv2.imwrite(annotated_image_file, annotated_frame)
             
-            # Update the current_results to include the image paths
             self.current_results["original_image_path"] = original_frame_file
             self.current_results["annotated_image_path"] = annotated_image_file
         
-        # Only log when we're actually saving results with detections
         if self.current_results and self.current_results["detections"]:
             print(f"[Session {self.session_id[:8]}] Saved frame {self.frame_count} with {self.current_results['total_persons']} persons")

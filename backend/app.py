@@ -49,13 +49,16 @@ def start_detection():
         # Create session-specific directory for images
         session_images_dir = os.path.join(IMAGES_DIR, session_id)
         os.makedirs(session_images_dir, exist_ok=True)
-        
+
         # Create detector for this session
+        # In the start_detection route, modify the detector initialization:
+
         detector = RTSPDetector(
             rtsp_url=rtsp_url,
             session_id=session_id,
             output_dir=session_dir,
-            images_dir=IMAGES_DIR
+            images_dir=IMAGES_DIR,
+            device='cpu'  # Add this parameter
         )
         
         # Start detection in a separate thread

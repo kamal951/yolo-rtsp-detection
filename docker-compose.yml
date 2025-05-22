@@ -12,16 +12,11 @@ services:
     environment:
       - RESULTS_DIR=/app/detection_results
       - IMAGES_DIR=/app/saved_images
+      - DEVICE=cpu # Force CPU usage
     ports:
       - "5000:5000"
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # Removed GPU configuration
 
   frontend:
     build:

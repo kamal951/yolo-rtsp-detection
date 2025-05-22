@@ -6,6 +6,7 @@ function ImageGallery({ activeSession }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [viewType, setViewType] = useState("annotated"); // "annotated" or "original"
+  const [fullscreenImage, setFullscreenImage] = useState(null);
 
   const api = axios.create({
     baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
@@ -128,13 +129,15 @@ function ImageGallery({ activeSession }) {
             {filteredImages.map((image) => (
               <div
                 key={image.filename}
-                className="border rounded-md overflow-hidden bg-gray-50"
+                className="border rounded-md overflow-hidden bg-gray-50 cursor-pointer"
+                onClick={() => setFullscreenImage(image)}
               >
                 <img
                   src={image.url}
                   alt={`${viewType} frame`}
                   className="w-full object-contain h-48"
                   loading="lazy"
+                  style={{ width: "200px", height: "112.5px" }}
                 />
                 <div className="p-2 text-xs">
                   <p className="font-medium">
@@ -145,6 +148,25 @@ function ImageGallery({ activeSession }) {
               </div>
             ))}
           </div>
+
+          {fullscreenImage && (
+            <div
+              className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50"
+              onClick={() => setFullscreenImage(null)}
+            >
+              <button
+                className="absolute top-4 right-4 text-white text-2xl hover:text-gray-300"
+                onClick={() => setFullscreenImage(null)}
+              >
+                ✕
+              </button>
+              <img
+                src={fullscreenImage.url}
+                alt="Fullscreen view"
+                className="max-h-[90vh] max-w-[90vw] object-contain"
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
