@@ -1,13 +1,36 @@
 import axios from "axios";
 
-// Create an axios instance with base URL
+// Fonction pour détecter l'environnement et configurer l'URL
+function getApiUrl() {
+  // Si REACT_APP_API_URL est défini, l'utiliser
+  if (process.env.REACT_APP_API_URL) {
+    return process.env.REACT_APP_API_URL;
+  }
+
+  // Sinon, utiliser l'URL dynamique basée sur l'hôte actuel
+  const protocol = window.location.protocol;
+  const hostname = window.location.hostname;
+
+  // Si on est en localhost, utiliser localhost:5000
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${protocol}//localhost:5000/api`;
+  }
+
+  // Sinon, utiliser la même IP que le frontend mais port 5000
+  return `${protocol}//${hostname}:5000/api`;
+}
+
+// Create an axios instance with dynamic base URL
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "http://localhost:5000/api",
+  baseURL: getApiUrl(),
   timeout: 10000,
   headers: {
     "Content-Type": "application/json",
   },
 });
+
+// Afficher l'URL utilisée pour debug
+console.log("API URL:", getApiUrl());
 
 // Start a new detection session
 export const startDetection = async (rtspUrl) => {
