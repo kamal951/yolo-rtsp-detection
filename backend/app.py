@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS, cross_origin
 import os
@@ -54,16 +55,14 @@ def start_detection():
         # Create session-specific directory for images
         session_images_dir = os.path.join(IMAGES_DIR, session_id)
         os.makedirs(session_images_dir, exist_ok=True)
-
-        # Create detector for this session
-        # In the start_detection route, modify the detector initialization:
-
+        
+        # Create detector for this session with CPU device
         detector = RTSPDetector(
             rtsp_url=rtsp_url,
             session_id=session_id,
             output_dir=session_dir,
             images_dir=IMAGES_DIR,
-            device='cpu'  # Add this parameter
+            device='cpu'  # Explicitly use CPU
         )
         
         # Start detection in a separate thread
@@ -92,6 +91,7 @@ def start_detection():
         }), 201
         
     except Exception as e:
+        print(f"[API] Error starting detection: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stop_detection/<session_id>', methods=['POST'])
@@ -113,6 +113,7 @@ def stop_detection(session_id):
         }), 200
         
     except Exception as e:
+        print(f"[API] Error stopping detection: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/session_status/<session_id>', methods=['GET'])
@@ -176,6 +177,7 @@ def get_detection_results(session_id):
         }), 200
         
     except Exception as e:
+        print(f"[API] Error getting detection results: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/sessions', methods=['GET'])
@@ -238,85 +240,8 @@ def list_session_images(session_id):
         }), 200
         
     except Exception as e:
+        print(f"[API] Error listing images: {e}")
         return jsonify({"error": str(e)}), 500
-
-def generate_frames(session_id):
-    """
-    Generator function to yield MJPEG frames from the session's detector
-    """
-    if session_id not in active_sessions:
-        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Session not found") + b'\r\n'
-        return
-    
-    detector = active_sessions[session_id].get("detector")
-    if not detector:
-        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Detector not found") + b'\r\n'
-        return
-    
-    # Check if session is running
-    if active_sessions[session_id]["status"] != "running":
-        yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("Session not running") + b'\r\n'
-        return
-    
-    while active_sessions[session_id]["status"] == "running":
-        try:
-            # Get the current processed frame from detector
-            if detector.current_frame is not None:
-                # Create a copy of the frame with bounding boxes
-                annotated_frame = detector.current_frame.copy()
-                
-                # Draw bounding boxes for all detected objects
-                if hasattr(detector, 'current_full_detections') and detector.current_full_detections:
-                    # Different colors for different classes
-                    colors = {
-                        "person": (0, 255, 0),  # Green for persons
-                        "car": (0, 0, 255),     # Red for cars
-                        "animal": (255, 0, 0)   # Blue for animals
-                    }
-                    
-                    for det in detector.current_full_detections["detections"]:
-                        bbox = det["bbox"]
-                        x1, y1, x2, y2 = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
-                        conf = det["confidence"]
-                        class_name = det["class"]
-                        
-                        # Draw bounding box with class-specific color
-                        color = colors.get(class_name, (255, 255, 255))
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-                        
-                        # Add label
-                        label = f"{class_name}: {conf:.2f}"
-                        cv2.putText(annotated_frame, label, (x1, y1 - 10),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                
-                # Add a timestamp
-                cv2.putText(
-                    annotated_frame,
-                    f"Session: {session_id[:8]}... | Frame: {detector.frame_count}",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7,
-                    (255, 255, 255),
-                    2
-                )
-                
-                # Encode to JPEG format
-                ret, buffer = cv2.imencode('.jpg', annotated_frame)
-                frame = buffer.tobytes()
-                
-                # Yield the frame in MJPEG format
-                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n'
-            else:
-                # If no frame is available, yield a placeholder
-                yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame("No frame available") + b'\r\n'
-            
-            # Sleep briefly to control frame rate (adjust as needed)
-            time.sleep(0.03)  # ~30 FPS
-            
-        except Exception as e:
-            print(f"Error generating frame: {e}")
-            yield b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + utils.create_error_frame(f"Error: {str(e)}") + b'\r\n'
-            time.sleep(1)  # Longer delay on error
 
 @app.route('/api/stream/<session_id>')
 @cross_origin()
@@ -416,4 +341,4 @@ if __name__ == '__main__':
     print("[API] RTSP Detection System starting...")
     print(f"[API] Detection results will be saved to: {RESULTS_DIR}")
     print(f"[API] Images will be saved to: {IMAGES_DIR}")
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=False)

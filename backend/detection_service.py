@@ -17,7 +17,7 @@ class RTSPDetector:
                  detect_classes=[0, 2, 16],
                  save_classes=[0],
                  images_dir=None,
-                 device='cpu'):  # New parameter for device
+                 device='cpu'):
         
         self.rtsp_url = rtsp_url
         self.session_id = session_id
@@ -30,10 +30,10 @@ class RTSPDetector:
         self.save_classes = save_classes
         
         # Force CPU usage
-        self.device = 'cpu'
+        self.device = device if device else 'cpu'
         
         # Set PyTorch to use CPU
-        torch.set_num_threads(4)  # Optimize for CPU
+        torch.set_num_threads(4)
         
         # Class name mapping
         self.class_names = {
@@ -63,14 +63,13 @@ class RTSPDetector:
             
             self.model = YOLO(model_name)
             # Explicitly move model to CPU
-            self.model.to(self.device)
+            if hasattr(self.model, 'to'):
+                self.model.to(self.device)
             print(f"Model {model_name} loaded successfully on {self.device}")
         except Exception as e:
             print(f"Error loading model: {e}")
             raise
     
-    # In the start_detection method, add better frame management:
-
     def start_detection(self):
         """Start the detection process on the RTSP stream"""
         self.running = True
@@ -131,7 +130,7 @@ class RTSPDetector:
                         self._save_results()
                         self.last_save_time = current_time
                     
-                    frame_skip = 2  # Skip next 2 frames
+                    frame_skip = 2  # Skip next 2 frames for performance
                 else:
                     frame_skip -= 1
                 
@@ -146,14 +145,12 @@ class RTSPDetector:
             print(f"Error in detection process: {e}")
             self.running = False
     
-    # Rest of the methods remain the same...
     def stop_detection(self):
         """Stop the detection process"""
         self.running = False
     
     def _process_results(self, results, frame):
-        """Process detection results - same as original"""
-        # [Previous implementation remains unchanged]
+        """Process detection results"""
         height, width = frame.shape[:2]
         
         saved_detections = []
@@ -162,34 +159,35 @@ class RTSPDetector:
         if len(results) > 0:
             result = results[0]
             
-            for i, det in enumerate(result.boxes):
-                class_id = int(det.cls)
-                
-                if class_id in self.detect_classes:
-                    box = det.xyxy[0].tolist()
+            if result.boxes is not None and len(result.boxes) > 0:
+                for i, det in enumerate(result.boxes):
+                    class_id = int(det.cls)
                     
-                    rel_box = [
-                        box[0] / width,
-                        box[1] / height,
-                        box[2] / width,
-                        box[3] / height
-                    ]
-                    
-                    class_name = self.class_names.get(class_id, "unknown")
-                    
-                    detection = {
-                        "id": i,
-                        "class": class_name,
-                        "class_id": class_id,
-                        "confidence": float(det.conf),
-                        "bbox": [float(x) for x in box],
-                        "rel_bbox": [float(x) for x in rel_box]
-                    }
-                    
-                    all_detections.append(detection)
-                    
-                    if class_id in self.save_classes:
-                        saved_detections.append(detection)
+                    if class_id in self.detect_classes:
+                        box = det.xyxy[0].tolist()
+                        
+                        rel_box = [
+                            box[0] / width,
+                            box[1] / height,
+                            box[2] / width,
+                            box[3] / height
+                        ]
+                        
+                        class_name = self.class_names.get(class_id, "unknown")
+                        
+                        detection = {
+                            "id": i,
+                            "class": class_name,
+                            "class_id": class_id,
+                            "confidence": float(det.conf),
+                            "bbox": [float(x) for x in box],
+                            "rel_bbox": [float(x) for x in rel_box]
+                        }
+                        
+                        all_detections.append(detection)
+                        
+                        if class_id in self.save_classes:
+                            saved_detections.append(detection)
         
         self.current_results = {
             "timestamp": datetime.now().isoformat(),
@@ -215,8 +213,7 @@ class RTSPDetector:
             print(f"[Session {self.session_id[:8]}] Detected: {counts['person']} persons, {counts['car']} cars, {counts['animal']} animals")
     
     def _save_results(self):
-        """Save detection results to file - same as original"""
-        # [Previous implementation remains unchanged]
+        """Save detection results to file"""
         if self.current_results is None:
             return
         
