@@ -48,6 +48,7 @@ class RTSPDetector:
         self.current_frame = None
         self.current_results = None
         self.current_full_detections = None
+        self.model = None  # Initialize model as None first
         
         # Ensure images directory exists
         os.makedirs(self.images_dir, exist_ok=True)
@@ -57,21 +58,29 @@ class RTSPDetector:
         os.makedirs(self.session_images_dir, exist_ok=True)
         
         # Initialize model with CPU
+        self._initialize_model()
+    
+    def _initialize_model(self):
+        """Initialize the YOLO model"""
         try:
             import logging
             logging.getLogger("ultralytics").setLevel(logging.WARNING)
             
-            self.model = YOLO(model_name)
+            self.model = YOLO(self.model_name)
             # Explicitly move model to CPU
             if hasattr(self.model, 'to'):
                 self.model.to(self.device)
-            print(f"Model {model_name} loaded successfully on {self.device}")
+            print(f"Model {self.model_name} loaded successfully on {self.device}")
         except Exception as e:
             print(f"Error loading model: {e}")
             raise
     
     def start_detection(self):
         """Start the detection process on the RTSP stream"""
+        if self.model is None:
+            print("Model not initialized, attempting to initialize...")
+            self._initialize_model()
+            
         self.running = True
         
         try:
@@ -144,10 +153,12 @@ class RTSPDetector:
         except Exception as e:
             print(f"Error in detection process: {e}")
             self.running = False
+            raise  # Re-raise the exception to be caught by the calling code
     
     def stop_detection(self):
         """Stop the detection process"""
         self.running = False
+        print(f"[Session {self.session_id[:8]}] Stop detection requested")
     
     def _process_results(self, results, frame):
         """Process detection results"""
@@ -269,3 +280,15 @@ class RTSPDetector:
         
         if self.current_results and self.current_results["detections"]:
             print(f"[Session {self.session_id[:8]}] Saved frame {self.frame_count} with {self.current_results['total_persons']} persons")
+    
+    def is_running(self):
+        """Check if detection is currently running"""
+        return self.running
+    
+    def get_current_frame(self):
+        """Get the current frame"""
+        return self.current_frame
+    
+    def get_current_detections(self):
+        """Get the current detection results"""
+        return self.current_full_detections

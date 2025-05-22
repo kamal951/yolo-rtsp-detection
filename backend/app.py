@@ -10,6 +10,7 @@ import utils
 import cv2
 import numpy as np
 import logging
+import traceback
 
 # Configure Flask logging to be less verbose
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
@@ -33,6 +34,18 @@ os.makedirs(IMAGES_DIR, exist_ok=True)
 
 # Dictionary to store active detection sessions
 active_sessions = {}
+
+def run_detection_in_thread(detector, session_id):
+    """Wrapper function to run detection in a thread with error handling"""
+    try:
+        detector.start_detection()
+    except Exception as e:
+        print(f"[API] Error in detection thread for session {session_id[:8]}: {e}")
+        print(f"[API] Traceback: {traceback.format_exc()}")
+        # Update session status to indicate error
+        if session_id in active_sessions:
+            active_sessions[session_id]["status"] = "error"
+            active_sessions[session_id]["error"] = str(e)
 
 @app.route('/api/start_detection', methods=['POST'])
 def start_detection():
@@ -65,8 +78,15 @@ def start_detection():
             device='cpu'  # Explicitly use CPU
         )
         
-        # Start detection in a separate thread
-        detection_thread = threading.Thread(target=detector.start_detection)
+        # Verify that the detector has the start_detection method
+        if not hasattr(detector, 'start_detection'):
+            return jsonify({"error": "Detection service initialization failed"}), 500
+        
+        # Start detection in a separate thread with error handling
+        detection_thread = threading.Thread(
+            target=run_detection_in_thread, 
+            args=(detector, session_id)
+        )
         detection_thread.daemon = True
         detection_thread.start()
         
@@ -77,7 +97,8 @@ def start_detection():
             "detector": detector,
             "thread": detection_thread,
             "status": "running",
-            "images_dir": session_images_dir
+            "images_dir": session_images_dir,
+            "error": None
         }
         
         print(f"[API] New detection session started: {session_id[:8]}... for {rtsp_url}")
@@ -92,6 +113,7 @@ def start_detection():
         
     except Exception as e:
         print(f"[API] Error starting detection: {e}")
+        print(f"[API] Traceback: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/stop_detection/<session_id>', methods=['POST'])
@@ -101,7 +123,10 @@ def stop_detection(session_id):
     
     try:
         # Stop the detector
-        active_sessions[session_id]["detector"].stop_detection()
+        detector = active_sessions[session_id].get("detector")
+        if detector and hasattr(detector, 'stop_detection'):
+            detector.stop_detection()
+        
         active_sessions[session_id]["status"] = "stopped"
         
         print(f"[API] Detection session stopped: {session_id[:8]}...")
@@ -123,14 +148,20 @@ def session_status(session_id):
     
     session = active_sessions[session_id]
     
-    return jsonify({
+    response_data = {
         "session_id": session_id,
         "rtsp_url": session["rtsp_url"],
         "start_time": session["start_time"],
         "status": session["status"],
         "runtime": time.time() - session["start_time"],
         "images_dir": session.get("images_dir", "")
-    }), 200
+    }
+    
+    # Include error information if present
+    if session.get("error"):
+        response_data["error"] = session["error"]
+    
+    return jsonify(response_data), 200
 
 @app.route('/api/detection_results/<session_id>', methods=['GET'])
 def get_detection_results(session_id):
@@ -185,14 +216,20 @@ def list_sessions():
     sessions_data = []
     
     for session_id, session in active_sessions.items():
-        sessions_data.append({
+        session_info = {
             "session_id": session_id,
             "rtsp_url": session["rtsp_url"],
             "start_time": session["start_time"],
             "status": session["status"],
             "runtime": time.time() - session["start_time"],
             "images_dir": session.get("images_dir", "")
-        })
+        }
+        
+        # Include error information if present
+        if session.get("error"):
+            session_info["error"] = session["error"]
+            
+        sessions_data.append(session_info)
     
     return jsonify({"sessions": sessions_data}), 200
 
@@ -267,7 +304,7 @@ def video_feed(session_id):
         while active_sessions[session_id]["status"] == "running":
             try:
                 # Get the current processed frame from detector
-                if detector.current_frame is not None:
+                if hasattr(detector, 'current_frame') and detector.current_frame is not None:
                     # Create a copy of the frame with bounding boxes
                     annotated_frame = detector.current_frame.copy()
                     
@@ -298,7 +335,7 @@ def video_feed(session_id):
                     # Add a timestamp
                     cv2.putText(
                         annotated_frame,
-                        f"Session: {session_id[:8]}... | Frame: {detector.frame_count}",
+                        f"Session: {session_id[:8]}... | Frame: {getattr(detector, 'frame_count', 0)}",
                         (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
